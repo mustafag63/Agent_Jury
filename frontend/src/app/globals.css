@@ -90,6 +90,47 @@ body {
   color: #991b1b;
 }
 
+.trust-info {
+  background: #eff6ff;
+  border: 1px solid #93c5fd;
+  border-radius: 10px;
+  padding: 12px;
+  margin: 12px 0;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.trust-info a {
+  color: #2563eb;
+  text-decoration: underline;
+}
+
+.attestation-info {
+  color: #166534;
+  font-size: 13px;
+  margin-top: 6px;
+}
+
+.tx-confirmation {
+  background: #f0fdf4;
+  border: 1px solid #86efac;
+  border-radius: 10px;
+  padding: 12px;
+  margin-top: 12px;
+}
+
+.tx-confirmation a {
+  color: #2563eb;
+  text-decoration: underline;
+  font-family: monospace;
+}
+
+.verify-hint {
+  font-size: 13px;
+  color: #4b5563;
+  margin-top: 4px;
+}
+
 .thinking {
   opacity: 0.7;
   animation: pulse 1s infinite ease-in-out;

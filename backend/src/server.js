@@ -1,6 +1,7 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
+import { Wallet, solidityPackedKeccak256 } from "ethers";
 import { buildFinalVerdict, runSingleAgent } from "./agents.js";
 
 const app = express();
@@ -10,6 +11,28 @@ app.use(express.json({ limit: "1mb" }));
 const PORT = process.env.PORT || 4000;
 const LLM_API_KEY = process.env.LLM_API_KEY || "";
 const LLM_MODEL = process.env.LLM_MODEL || "gemini-2.5-flash";
+const ATTESTATION_PRIVATE_KEY = process.env.ATTESTATION_PRIVATE_KEY || "";
+
+function getAttestationWallet() {
+  if (!ATTESTATION_PRIVATE_KEY) return null;
+  return new Wallet(ATTESTATION_PRIVATE_KEY);
+}
+
+async function signAttestation(caseHash, feasibility, innovation, risk, finalScore, shortVerdict) {
+  const wallet = getAttestationWallet();
+  if (!wallet) return null;
+
+  const messageHash = solidityPackedKeccak256(
+    ["bytes32", "uint8", "uint8", "uint8", "uint8", "string"],
+    [caseHash, feasibility, innovation, risk, finalScore, shortVerdict]
+  );
+
+  const signature = await wallet.signMessage(
+    Buffer.from(messageHash.slice(2), "hex")
+  );
+
+  return { attestor: wallet.address, messageHash, signature };
+}
 
 function classifyEvaluationError(err) {
   const message = err instanceof Error ? err.message : "Unknown error";
@@ -112,7 +135,18 @@ app.post("/evaluate", async (req, res) => {
     const agent_results = [feasibility, innovation, risk];
     const final_verdict = buildFinalVerdict(agent_results);
 
-    return res.json({ agent_results, final_verdict });
+    const { keccak256: keccak, toUtf8Bytes } = await import("ethers");
+    const caseHash = keccak(toUtf8Bytes(caseText));
+    const attestation = await signAttestation(
+      caseHash,
+      feasibility.score,
+      innovation.score,
+      risk.score,
+      final_verdict.final_score,
+      final_verdict.summary.slice(0, 140)
+    );
+
+    return res.json({ agent_results, final_verdict, attestation });
   } catch (err) {
     const classified = classifyEvaluationError(err);
     return res.status(classified.status).json({

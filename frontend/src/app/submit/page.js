@@ -19,7 +19,8 @@ export default function SubmitPage() {
       const result = await evaluateCase(caseText.trim());
       setSession({
         caseText: caseText.trim(),
-        evaluation: result
+        evaluation: result,
+        attestation: result.attestation || null
       });
       router.push("/deliberation");
     } catch (err) {

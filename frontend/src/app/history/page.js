@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getReadContract } from "@/lib/contract";
+import { getReadContract, MONAD_BLOCK_EXPLORER_URL, CONTRACT_ADDRESS } from "@/lib/contract";
 
 function formatTime(ts) {
   const ms = Number(ts) * 1000;
@@ -50,6 +50,17 @@ export default function HistoryPage() {
   return (
     <div className="card">
       <h2>5) On-chain History</h2>
+      <p className="trust-info">
+        These records are read directly from the smart contract via public RPC.
+        Each verdict is immutable and independently verifiable.{" "}
+        <a
+          href={`${MONAD_BLOCK_EXPLORER_URL}/address/${CONTRACT_ADDRESS}`}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          View contract on explorer
+        </a>
+      </p>
       {loading && <p>Loading verdict history...</p>}
       {error && <p style={{ color: "crimson" }}>{error}</p>}
       {!loading && !items.length && <p>No verdicts saved yet.</p>}
@@ -63,7 +74,16 @@ export default function HistoryPage() {
             Risk {item.riskScore}
           </p>
           <p>{item.shortVerdict}</p>
-          <p>Submitter: {item.submitter}</p>
+          <p>
+            Submitter:{" "}
+            <a
+              href={`${MONAD_BLOCK_EXPLORER_URL}/address/${item.submitter}`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {item.submitter.slice(0, 6)}...{item.submitter.slice(-4)}
+            </a>
+          </p>
           <p>Time: {formatTime(item.timestamp)}</p>
         </div>
       ))}

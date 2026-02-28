@@ -12,7 +12,7 @@ export const MONAD_BLOCK_EXPLORER_URL =
   process.env.NEXT_PUBLIC_MONAD_BLOCK_EXPLORER_URL || "https://testnet.monadexplorer.com";
 
 export const AGENT_JURY_ABI = [
-  "function saveVerdict(bytes32 caseHash,uint8 feasibilityScore,uint8 innovationScore,uint8 riskScore,uint8 finalScore,string shortVerdict) external",
+  "function saveVerdict(bytes32 caseHash,uint8 feasibilityScore,uint8 innovationScore,uint8 riskScore,uint8 finalScore,string shortVerdict,bytes attestationSignature) external",
   "function getVerdict(uint256 index) external view returns (tuple(bytes32 caseHash,uint8 feasibilityScore,uint8 innovationScore,uint8 riskScore,uint8 finalScore,string shortVerdict,address submitter,uint256 timestamp))",
   "function getVerdictCount() external view returns (uint256)"
 ];

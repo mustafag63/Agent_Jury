@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { keccak256, toUtf8Bytes } from "ethers";
 import { getSession, setSession } from "@/lib/storage";
-import { ensureCorrectNetwork, getBrowserProvider, getWriteContract } from "@/lib/contract";
+import { ensureCorrectNetwork, getBrowserProvider, getWriteContract, MONAD_BLOCK_EXPLORER_URL } from "@/lib/contract";
 
 function decisionClass(decision) {
   if (decision === "SHIP") return "badge ship";
@@ -43,13 +43,18 @@ export default function VerdictPage() {
       const contract = await getWriteContract();
       await ensureCorrectNetwork(provider);
       const hash = keccak256(toUtf8Bytes(caseText));
+
+      const attestation = session?.attestation;
+      const attestationSig = attestation?.signature || "0x";
+
       const tx = await contract.saveVerdict(
         hash,
         Number(feasibility?.score || 0),
         Number(innovation?.score || 0),
         Number(risk?.score || 0),
         Number(final_verdict?.final_score || 0),
-        shortVerdict
+        shortVerdict,
+        attestationSig
       );
       await tx.wait();
       setTxHash(tx.hash);
@@ -99,6 +104,22 @@ export default function VerdictPage() {
         ))}
       </ul>
 
+      <div className="trust-info">
+        <p>
+          <strong>How verification works:</strong> AI agents evaluate your case
+          off-chain (scores, reasoning). When you click &quot;Save on-chain&quot;, <em>you</em> sign
+          the transaction with MetaMask. The verdict record (scores, summary, your
+          address, timestamp) is written immutably to the smart contract. Anyone can
+          independently verify it on the block explorer.
+        </p>
+        {session?.attestation?.signature && (
+          <p className="attestation-info">
+            Backend attestation included. The AI output was cryptographically signed
+            by the backend before submission, binding scores to a verifiable signature.
+          </p>
+        )}
+      </div>
+
       <div className="row">
         <button className="button" disabled={saving} onClick={saveOnChain}>
           {saving ? "Waiting for MetaMask..." : "Save decision on-chain"}
@@ -108,7 +129,25 @@ export default function VerdictPage() {
         </button>
       </div>
 
-      {txHash && <p>Saved. Tx hash: {txHash}</p>}
+      {txHash && (
+        <div className="tx-confirmation">
+          <p>Saved on-chain successfully.</p>
+          <p>
+            Tx:{" "}
+            <a
+              href={`${MONAD_BLOCK_EXPLORER_URL}/tx/${txHash}`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {txHash.slice(0, 10)}...{txHash.slice(-8)}
+            </a>
+          </p>
+          <p className="verify-hint">
+            Verify this record on the block explorer. The data is immutable and
+            publicly readable.
+          </p>
+        </div>
+      )}
       {error && <p style={{ color: "crimson" }}>{error}</p>}
     </div>
   );
