@@ -104,6 +104,22 @@ Path: `frontend/src/app`
 5. `npm run dev`
 6. Open `http://localhost:3000`
 
+## Troubleshooting (Backend)
+
+- `{"error":"Missing LLM_API_KEY on backend"}`
+  - Add `LLM_API_KEY` to `backend/.env`, then restart backend.
+- `LLM call failed (401) / invalid API key`
+  - Use a valid Gemini API key and check for spaces/wrong characters.
+- `LLM call failed (429) / quota-rate limit`
+  - Check Gemini quota/billing, wait briefly, then retry.
+- `Model response is not valid JSON` or schema validation error
+  - Usually temporary model output instability; retry.
+  - Ensure `LLM_MODEL` is valid (recommended: `gemini-2.5-flash`).
+- `EADDRINUSE: address already in use :::4000`
+  - Port is occupied; use another port in `.env` (e.g. `PORT=4001`) or stop the process using port `4000`.
+- `curl: (7) Failed to connect to localhost port 4000`
+  - Backend may not be running; start with `npm run dev` and call the correct port.
+
 ## Hackathon Notes
 
 - This MVP is intentionally simple for live demos.
