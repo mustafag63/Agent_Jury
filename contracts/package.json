@@ -1,0 +1,16 @@
+{
+  "name": "agent-jury-contracts",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "hardhat compile",
+    "test": "hardhat test",
+    "deploy:monad": "hardhat ignition deploy ./ignition/modules/AgentJury.js --network monadTestnet"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-ignition": "^0.15.5",
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "dotenv": "^16.6.1",
+    "hardhat": "^2.26.0"
+  }
+}
