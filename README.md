@@ -41,6 +41,17 @@ Path: `backend/src/server.js`, `backend/src/agents.js`
 - Output:
   - `agent_results` (Feasibility, Innovation, Risk & Ethics)
   - `final_verdict` (weighted final judge output)
+- Port: `PORT` (default `4000`)
+
+### LLM Provider
+- Provider: **Gemini only**
+- Endpoint: Google Generative Language API (`generateContent`)
+- Backend validates model outputs with strict JSON schema (`zod`)
+- If model output is not valid JSON/schema-compliant, request is rejected
+
+### Reliability Guards
+- `fetch` timeout via `AbortController`
+- Limited retry with exponential backoff for transient failures (`408`, `429`, `5xx`, network/abort errors)
 
 ### Final Judge Weighted Logic
 - Feasibility: `45%`
@@ -67,7 +78,10 @@ Path: `frontend/src/app`
 ### Backend
 1. `cd backend`
 2. `cp .env.example .env`
-3. Set `LLM_API_KEY`
+3. Set:
+   - `LLM_API_KEY` (required, Gemini key)
+   - `LLM_MODEL` (default: `gemini-2.5-flash`)
+   - `PORT` (optional, default: `4000`)
 4. `npm install`
 5. `npm run dev`
 
