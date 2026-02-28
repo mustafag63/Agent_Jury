@@ -5,6 +5,9 @@ require("dotenv").config();
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
   solidity: "0.8.24",
+  paths: {
+    sources: "./src"
+  },
   networks: {
     monadTestnet: {
       url: process.env.MONAD_RPC_URL || "",

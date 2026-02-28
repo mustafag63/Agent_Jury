@@ -13,6 +13,10 @@ contract AgentJury {
         uint256 timestamp;
     }
 
+    address public owner;
+    uint256 public evaluationFee;
+    uint256 public totalRevenue;
+
     VerdictRecord[] private verdicts;
 
     event VerdictSaved(
@@ -23,6 +27,19 @@ contract AgentJury {
         string shortVerdict
     );
 
+    event FeeUpdated(uint256 oldFee, uint256 newFee);
+    event Withdrawn(address indexed to, uint256 amount);
+
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Only owner");
+        _;
+    }
+
+    constructor(uint256 _evaluationFee) {
+        owner = msg.sender;
+        evaluationFee = _evaluationFee;
+    }
+
     function saveVerdict(
         bytes32 caseHash,
         uint8 feasibilityScore,
@@ -30,7 +47,8 @@ contract AgentJury {
         uint8 riskScore,
         uint8 finalScore,
         string calldata shortVerdict
-    ) external {
+    ) external payable {
+        require(msg.value >= evaluationFee, "Insufficient fee");
         require(bytes(shortVerdict).length <= 140, "Verdict too long");
         require(
             feasibilityScore <= 100 &&
@@ -39,6 +57,8 @@ contract AgentJury {
                 finalScore <= 100,
             "Scores must be 0-100"
         );
+
+        totalRevenue += msg.value;
 
         verdicts.push(
             VerdictRecord({
@@ -71,5 +91,20 @@ contract AgentJury {
 
     function getVerdictCount() external view returns (uint256) {
         return verdicts.length;
+    }
+
+    function setFee(uint256 _newFee) external onlyOwner {
+        uint256 oldFee = evaluationFee;
+        evaluationFee = _newFee;
+        emit FeeUpdated(oldFee, _newFee);
+    }
+
+    function withdraw() external onlyOwner {
+        uint256 balance = address(this).balance;
+        require(balance > 0, "No funds");
+        totalRevenue = 0;
+        (bool ok, ) = payable(owner).call{value: balance}("");
+        require(ok, "Transfer failed");
+        emit Withdrawn(owner, balance);
     }
 }
