@@ -9,7 +9,7 @@ app.use(express.json({ limit: "1mb" }));
 
 const PORT = process.env.PORT || 4000;
 const LLM_API_KEY = process.env.LLM_API_KEY || "";
-const LLM_MODEL = process.env.LLM_MODEL || "gpt-4o-mini";
+const LLM_MODEL = process.env.LLM_MODEL || "gemini-2.5-flash";
 
 app.get("/health", (_req, res) => {
   res.json({ ok: true, service: "agent-jury-backend" });

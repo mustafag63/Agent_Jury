@@ -1,7 +1,54 @@
+import { z } from "zod";
+
 const JSON_SYSTEM_RULES = `
 You are a strict JSON API.
 Return ONLY valid JSON. No markdown, no backticks, no prose outside JSON.
 `.trim();
+
+const FETCH_TIMEOUT_MS = 12_000;
+const FETCH_MAX_RETRIES = 2;
+const FETCH_BACKOFF_BASE_MS = 400;
+
+const RETRYABLE_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504]);
+const GEMINI_RESPONSE_SCHEMA = {
+  type: "OBJECT",
+  required: ["score", "pros", "cons", "rationale"],
+  properties: {
+    score: {
+      type: "NUMBER",
+      minimum: 0,
+      maximum: 100
+    },
+    pros: {
+      type: "ARRAY",
+      maxItems: 5,
+      items: {
+        type: "STRING"
+      }
+    },
+    cons: {
+      type: "ARRAY",
+      maxItems: 5,
+      items: {
+        type: "STRING"
+      }
+    },
+    rationale: {
+      type: "STRING"
+    }
+  }
+};
+
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function isRetryableError(error) {
+  if (!(error instanceof Error)) return false;
+  return error.name === "AbortError" || error.message.includes("fetch failed");
+}
 
 function clampScore(value) {
   const n = Number(value);
@@ -9,58 +56,104 @@ function clampScore(value) {
   return Math.max(0, Math.min(100, Math.round(n)));
 }
 
-function safeJsonParse(text) {
+const AgentResponseSchema = z
+  .object({
+    score: z.number().min(0).max(100),
+    pros: z.array(z.string().min(1).max(200)).max(5),
+    cons: z.array(z.string().min(1).max(200)).max(5),
+    rationale: z.string().min(1).max(600)
+  })
+  .strict();
+
+function parseAndValidateAgentResponse(text) {
+  let parsed;
   try {
-    return JSON.parse(text);
+    parsed = JSON.parse(text);
   } catch {
-    // If model adds text around JSON, try to recover first object block.
-    const match = text.match(/\{[\s\S]*\}/);
-    if (!match) throw new Error("Model response is not valid JSON");
-    return JSON.parse(match[0]);
+    throw new Error("Model response is not valid JSON");
   }
+
+  const result = AgentResponseSchema.safeParse(parsed);
+  if (!result.success) {
+    throw new Error(`Model response failed schema validation: ${result.error.message}`);
+  }
+
+  return result.data;
 }
 
-function normalizeAgentResponse(parsed, role) {
+function normalizeAgentResponse(validated, role) {
   return {
     role,
-    score: clampScore(parsed.score),
-    pros: Array.isArray(parsed.pros) ? parsed.pros.slice(0, 5) : [],
-    cons: Array.isArray(parsed.cons) ? parsed.cons.slice(0, 5) : [],
-    rationale:
-      typeof parsed.rationale === "string"
-        ? parsed.rationale.slice(0, 600)
-        : "No rationale provided."
+    score: clampScore(validated.score),
+    pros: validated.pros,
+    cons: validated.cons,
+    rationale: validated.rationale
   };
 }
 
-async function callOpenAIStyle({ apiKey, model, system, user }) {
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`
-    },
-    body: JSON.stringify({
-      model,
-      temperature: 0.2,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user }
-      ]
-    })
-  });
+async function callGemini({ apiKey, model, prompt }) {
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  for (let attempt = 0; attempt <= FETCH_MAX_RETRIES; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
-  if (!res.ok) {
-    const detail = await res.text();
-    throw new Error(`LLM call failed (${res.status}): ${detail}`);
+    try {
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          generationConfig: {
+            temperature: 0.2,
+            responseMimeType: "application/json",
+            responseSchema: GEMINI_RESPONSE_SCHEMA
+          },
+          contents: [
+            {
+              role: "user",
+              parts: [{ text: prompt }]
+            }
+          ]
+        }),
+        signal: controller.signal
+      });
+
+      if (!res.ok) {
+        const detail = await res.text();
+        if (attempt < FETCH_MAX_RETRIES && RETRYABLE_STATUS_CODES.has(res.status)) {
+          const backoffMs = FETCH_BACKOFF_BASE_MS * 2 ** attempt;
+          await sleep(backoffMs);
+          continue;
+        }
+        throw new Error(`LLM call failed (${res.status}): ${detail}`);
+      }
+
+      const json = await res.json();
+      const parts = json?.candidates?.[0]?.content?.parts;
+      const content = Array.isArray(parts)
+        ? parts
+            .map((part) => (typeof part?.text === "string" ? part.text : ""))
+            .join("")
+            .trim()
+        : "";
+      if (!content || typeof content !== "string") {
+        throw new Error("LLM response missing message content");
+      }
+      return content;
+    } catch (error) {
+      if (attempt < FETCH_MAX_RETRIES && isRetryableError(error)) {
+        const backoffMs = FETCH_BACKOFF_BASE_MS * 2 ** attempt;
+        await sleep(backoffMs);
+        continue;
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
-  const json = await res.json();
-  const content = json?.choices?.[0]?.message?.content;
-  if (!content || typeof content !== "string") {
-    throw new Error("LLM response missing message content");
-  }
-  return content;
+  throw new Error("LLM call failed after retries");
 }
 
 export async function runSingleAgent({
@@ -92,9 +185,10 @@ Constraints:
 - Score must be numeric 0-100.
 - Return JSON only.`;
 
-  const raw = await callOpenAIStyle({ apiKey, model, system, user });
-  const parsed = safeJsonParse(raw);
-  return normalizeAgentResponse(parsed, roleName);
+  const prompt = `${system}\n\n${user}`;
+  const raw = await callGemini({ apiKey, model, prompt });
+  const validated = parseAndValidateAgentResponse(raw);
+  return normalizeAgentResponse(validated, roleName);
 }
 
 export function buildFinalVerdict(agentResults) {
