@@ -23,7 +23,9 @@ export default function HomePage() {
         </p>
       </div>
 
-      <Link href="/connect">Start demo</Link>
+      <Link href="/connect" className="button" style={{ display: "inline-block", textDecoration: "none" }}>
+        Start demo
+      </Link>
     </div>
   );
 }

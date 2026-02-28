@@ -3,6 +3,24 @@
 node_modules/
 **/node_modules/
 
-/backend/.env
-/contracts/.env
+# environment secrets
+.env
+.env.local
+!.env.example
+!.env.d/*.env
+
+# data / databases
+*.db
+*.db-wal
+*.db-shm
+backend/data/
+
+# build artifacts
+frontend/.next/
+contracts/artifacts/
+contracts/cache/
+
+# misc
+.DS_Store
+*.log
 

@@ -1,0 +1,97 @@
+x-backend-base: &backend-base
+  build:
+    context: ./backend
+    dockerfile: Dockerfile
+  restart: unless-stopped
+  volumes:
+    - backend-data:/app/data
+  healthcheck:
+    test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4000/health"]
+    interval: 30s
+    timeout: 3s
+    retries: 3
+    start_period: 5s
+
+services:
+  # ── Nginx reverse proxy + load balancer ────────
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "${NGINX_PORT:-80}:80"
+    volumes:
+      - ./infra/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles: [staging, production]
+
+  # ── Backend ────────────────────────────────────
+  backend:
+    <<: *backend-base
+    env_file:
+      - ./backend/.env
+    environment:
+      - NODE_ENV=${NODE_ENV:-production}
+      - DATA_DB_PATH=/app/data/agent_jury.db
+
+  # ── Backend replicas (horizontal scaling) ──────
+  backend-2:
+    <<: *backend-base
+    env_file:
+      - ./backend/.env
+    environment:
+      - NODE_ENV=${NODE_ENV:-production}
+      - PORT=4001
+      - DATA_DB_PATH=/app/data/agent_jury.db
+    profiles: [production]
+
+  backend-3:
+    <<: *backend-base
+    env_file:
+      - ./backend/.env
+    environment:
+      - NODE_ENV=${NODE_ENV:-production}
+      - PORT=4002
+      - DATA_DB_PATH=/app/data/agent_jury.db
+    profiles: [production]
+
+  # ── Frontend ───────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_BACKEND_URL: ${NEXT_PUBLIC_BACKEND_URL:-http://localhost:4000}
+        NEXT_PUBLIC_AGENT_JURY_CONTRACT: ${NEXT_PUBLIC_AGENT_JURY_CONTRACT:-0x0000000000000000000000000000000000000000}
+        NEXT_PUBLIC_MONAD_CHAIN_ID: ${NEXT_PUBLIC_MONAD_CHAIN_ID:-10143}
+        NEXT_PUBLIC_MONAD_RPC_URL: ${NEXT_PUBLIC_MONAD_RPC_URL:-https://testnet-rpc.monad.xyz}
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+
+  # ── Dev-only: backend with hot-reload ──────────
+  backend-dev:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./backend/src:/app/src:ro
+      - backend-data:/app/data
+    env_file:
+      - ./backend/.env
+    environment:
+      - NODE_ENV=development
+      - DATA_DB_PATH=/app/data/agent_jury.db
+    profiles: [dev]
+
+volumes:
+  backend-data:
+    driver: local

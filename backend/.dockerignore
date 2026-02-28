@@ -1,0 +1,13 @@
+node_modules
+data
+.env
+.env.local
+.env.d
+*.db
+*.db-wal
+*.db-shm
+.git
+.gitignore
+Dockerfile*
+docker-compose*
+README.md

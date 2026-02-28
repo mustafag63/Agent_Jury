@@ -1,169 +1,82 @@
-import "dotenv/config";
 import express from "express";
-import cors from "cors";
-import { Wallet, solidityPackedKeccak256 } from "ethers";
-import { buildFinalVerdict, runSingleAgent } from "./agents.js";
+import config from "./config/index.js";
+import logger from "./observability/logger.js";
+import { validateConfigOnStartup } from "./config/validate.js";
+import { requestId } from "./middleware/requestId.js";
+import { requestLogger } from "./middleware/requestLogger.js";
+import { createHelmet, createCors } from "./middleware/secureHeaders.js";
+import { globalLimiter, evaluateLimiter } from "./middleware/rateLimiter.js";
+import { apiKeyAuth } from "./middleware/auth.js";
+import { inputSanitization } from "./middleware/sanitizer.js";
+import healthRouter from "./routes/health.js";
+import metricsRouter from "./routes/metrics.js";
+import evaluateRouter from "./routes/evaluate.js";
+import evaluationsRouter from "./routes/evaluations.js";
+import { getDb, closeDb } from "./data/store.js";
+import { purgeExpired } from "./data/privacy.js";
+
+validateConfigOnStartup();
+
+getDb();
 
 const app = express();
-app.use(cors());
+
+app.disable("x-powered-by");
+app.set("trust proxy", 1);
+
+app.use(requestId);
+app.use(requestLogger);
+app.use(createHelmet());
+app.use(createCors());
+app.use(globalLimiter);
 app.use(express.json({ limit: "1mb" }));
 
-const PORT = process.env.PORT || 4000;
-const LLM_API_KEY = process.env.LLM_API_KEY || "";
-const LLM_PROVIDER = process.env.LLM_PROVIDER || "openrouter";
-const LLM_MODEL = process.env.LLM_MODEL || "google/gemini-2.0-flash-001";
-const LLM_MODEL_FALLBACK = process.env.LLM_MODEL_FALLBACK || "google/gemini-2.0-flash-lite-001";
-const ATTESTATION_PRIVATE_KEY = process.env.ATTESTATION_PRIVATE_KEY || "";
+app.use(healthRouter);
+app.use(metricsRouter);
+app.use(apiKeyAuth);
+app.use(inputSanitization);
+app.use("/evaluate", evaluateLimiter);
+app.use(evaluateRouter);
+app.use(evaluationsRouter);
 
-function getAttestationWallet() {
-  if (!ATTESTATION_PRIVATE_KEY) return null;
-  return new Wallet(ATTESTATION_PRIVATE_KEY);
+let purgeTimer = null;
+if (config.data.retentionDays > 0 && config.data.purgeIntervalMs > 0) {
+  purgeTimer = setInterval(() => {
+    try {
+      const count = purgeExpired();
+      if (count > 0) {
+        logger.info({ purgedCount: count }, "expired evaluations purged");
+      }
+    } catch (err) {
+      logger.error({ err }, "retention purge failed");
+    }
+  }, config.data.purgeIntervalMs);
 }
 
-async function signAttestation(caseHash, feasibility, innovation, risk, finalScore, shortVerdict) {
-  const wallet = getAttestationWallet();
-  if (!wallet) return null;
-
-  const messageHash = solidityPackedKeccak256(
-    ["bytes32", "uint8", "uint8", "uint8", "uint8", "string"],
-    [caseHash, feasibility, innovation, risk, finalScore, shortVerdict]
+const server = app.listen(config.port, () => {
+  logger.info(
+    { port: config.port, env: config.nodeEnv, pid: process.pid },
+    "Agent Jury backend started",
   );
+});
 
-  const signature = await wallet.signMessage(
-    Buffer.from(messageHash.slice(2), "hex")
-  );
+function gracefulShutdown(signal) {
+  logger.info({ signal }, "shutdown signal received, draining connections…");
 
-  return { attestor: wallet.address, messageHash, signature };
+  if (purgeTimer) clearInterval(purgeTimer);
+
+  server.close(() => {
+    logger.info("HTTP server closed");
+    closeDb();
+    logger.info("database connection closed");
+    process.exit(0);
+  });
+
+  setTimeout(() => {
+    logger.error("forced shutdown after timeout");
+    process.exit(1);
+  }, 10_000);
 }
 
-function classifyEvaluationError(err) {
-  const message = err instanceof Error ? err.message : "Unknown error";
-  const normalized = message.toLowerCase();
-
-  if (normalized.includes("model response is not valid json")) {
-    return {
-      status: 502,
-      error: "Model response is not valid JSON",
-      details:
-        "Gemini output did not match strict JSON expectations. Retry the request and verify LLM_MODEL (recommended: gemini-2.5-flash)."
-    };
-  }
-
-  if (normalized.includes("schema validation")) {
-    return {
-      status: 502,
-      error: "Model response failed schema validation",
-      details:
-        "Gemini returned JSON but not in required schema. Retry request and keep prompt/model stable."
-    };
-  }
-
-  if (normalized.includes("(401)") || normalized.includes("invalid api key")) {
-    return {
-      status: 401,
-      error: "LLM call failed (401) / invalid API key",
-      details:
-        "Use a valid Gemini API key and make sure there are no extra spaces or wrong characters in LLM_API_KEY."
-    };
-  }
-
-  if (normalized.includes("(429)") || normalized.includes("quota")) {
-    return {
-      status: 429,
-      error: "LLM call failed (429) / quota-rate limit",
-      details: "Check Gemini quota/billing, wait a bit, then retry."
-    };
-  }
-
-  if (normalized.includes("fetch failed") || normalized.includes("aborterror")) {
-    return {
-      status: 504,
-      error: "LLM provider timeout/network failure",
-      details: "Temporary provider/network issue. Retry shortly."
-    };
-  }
-
-  return {
-    status: 500,
-    error: "Evaluation failed",
-    details: message
-  };
-}
-
-app.get("/health", (_req, res) => {
-  res.json({ ok: true, service: "agent-jury-backend" });
-});
-
-app.post("/evaluate", async (req, res) => {
-  try {
-    const caseText = String(req.body?.case_text || "").trim();
-    if (!caseText) {
-      return res.status(400).json({ error: "case_text is required" });
-    }
-    if (caseText.length > 4000) {
-      return res.status(400).json({ error: "case_text is too long" });
-    }
-    if (!LLM_API_KEY) {
-      return res.status(500).json({ error: "Missing LLM_API_KEY on backend" });
-    }
-
-    const INTER_CALL_DELAY_MS = 1_500;
-
-    const agentOpts = { provider: LLM_PROVIDER, apiKey: LLM_API_KEY, model: LLM_MODEL, fallbackModel: LLM_MODEL_FALLBACK };
-
-    const feasibility = await runSingleAgent({
-      ...agentOpts,
-      roleName: "Feasibility Agent",
-      focusPrompt:
-        "Assess implementation realism, scope for a small team, and delivery speed.",
-      caseText
-    });
-
-    await new Promise((r) => setTimeout(r, INTER_CALL_DELAY_MS));
-
-    const innovation = await runSingleAgent({
-      ...agentOpts,
-      roleName: "Innovation Agent",
-      focusPrompt:
-        "Assess novelty, market differentiation, and user value uniqueness.",
-      caseText
-    });
-
-    await new Promise((r) => setTimeout(r, INTER_CALL_DELAY_MS));
-
-    const risk = await runSingleAgent({
-      ...agentOpts,
-      roleName: "Risk & Ethics Agent",
-      focusPrompt:
-        "Assess legal, misuse, safety, fairness, and ethical concerns. Higher score means higher risk.",
-      caseText
-    });
-
-    const agent_results = [feasibility, innovation, risk];
-    const final_verdict = buildFinalVerdict(agent_results);
-
-    const { keccak256: keccak, toUtf8Bytes } = await import("ethers");
-    const caseHash = keccak(toUtf8Bytes(caseText));
-    const attestation = await signAttestation(
-      caseHash,
-      feasibility.score,
-      innovation.score,
-      risk.score,
-      final_verdict.final_score,
-      final_verdict.summary.slice(0, 140)
-    );
-
-    return res.json({ agent_results, final_verdict, attestation });
-  } catch (err) {
-    const classified = classifyEvaluationError(err);
-    return res.status(classified.status).json({
-      error: classified.error,
-      details: classified.details
-    });
-  }
-});
-
-app.listen(PORT, () => {
-  // eslint-disable-next-line no-console
-  console.log(`Agent Jury backend listening on http://localhost:${PORT}`);
-});
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));

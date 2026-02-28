@@ -1,8 +1,8 @@
 {
-  "/submit/page": "app/submit/page.js",
-  "/deliberation/page": "app/deliberation/page.js",
-  "/verdict/page": "app/verdict/page.js",
-  "/history/page": "app/history/page.js",
   "/page": "app/page.js",
-  "/connect/page": "app/connect/page.js"
+  "/history/page": "app/history/page.js",
+  "/deliberation/page": "app/deliberation/page.js",
+  "/connect/page": "app/connect/page.js",
+  "/submit/page": "app/submit/page.js",
+  "/verdict/page": "app/verdict/page.js"
 }
