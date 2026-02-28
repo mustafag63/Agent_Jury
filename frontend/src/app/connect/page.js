@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { getBrowserProvider } from "@/lib/contract";
+import { getBrowserProvider, ensureCorrectNetwork } from "@/lib/contract";
 import { setSession } from "@/lib/storage";
 
 export default function ConnectPage() {
@@ -15,6 +15,7 @@ export default function ConnectPage() {
       setError("");
       const provider = await getBrowserProvider();
       await provider.send("eth_requestAccounts", []);
+      await ensureCorrectNetwork();
       const signer = await provider.getSigner();
       const signerAddress = await signer.getAddress();
       setAddress(signerAddress);

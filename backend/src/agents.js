@@ -5,7 +5,7 @@ You are a strict JSON API.
 Return ONLY valid JSON. No markdown, no backticks, no prose outside JSON.
 `.trim();
 
-const FETCH_TIMEOUT_MS = 12_000;
+const FETCH_TIMEOUT_MS = 30_000;
 const FETCH_MAX_RETRIES = 2;
 const FETCH_BACKOFF_BASE_MS = 400;
 
@@ -92,7 +92,7 @@ function normalizeAgentResponse(validated, role) {
 }
 
 async function callGemini({ apiKey, model, prompt }) {
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
   for (let attempt = 0; attempt <= FETCH_MAX_RETRIES; attempt += 1) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
@@ -101,7 +101,8 @@ async function callGemini({ apiKey, model, prompt }) {
       const res = await fetch(endpoint, {
         method: "POST",
         headers: {
-          "Content-Type": "application/json"
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey
         },
         body: JSON.stringify({
           generationConfig: {
@@ -133,9 +134,9 @@ async function callGemini({ apiKey, model, prompt }) {
       const parts = json?.candidates?.[0]?.content?.parts;
       const content = Array.isArray(parts)
         ? parts
-            .map((part) => (typeof part?.text === "string" ? part.text : ""))
-            .join("")
-            .trim()
+          .map((part) => (typeof part?.text === "string" ? part.text : ""))
+          .join("")
+          .trim()
         : "";
       if (!content || typeof content !== "string") {
         throw new Error("LLM response missing message content");

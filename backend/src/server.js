@@ -7,6 +7,15 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
 
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on("finish", () => {
+    const ms = Date.now() - start;
+    console.log(`${req.method} ${req.path} → ${res.statusCode} (${ms}ms)`);
+  });
+  next();
+});
+
 const PORT = process.env.PORT || 4000;
 const LLM_API_KEY = process.env.LLM_API_KEY || "";
 const LLM_MODEL = process.env.LLM_MODEL || "gemini-2.5-flash";
@@ -123,6 +132,9 @@ app.post("/evaluate", async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  // eslint-disable-next-line no-console
   console.log(`Agent Jury backend listening on http://localhost:${PORT}`);
+  if (!LLM_API_KEY) {
+    console.warn("⚠ WARNING: LLM_API_KEY is not set. POST /evaluate will fail.");
+    console.warn("  → Set it in backend/.env (see .env.example)");
+  }
 });
