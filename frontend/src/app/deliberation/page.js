@@ -8,8 +8,9 @@ import { getSession } from "@/lib/storage";
 export default function DeliberationPage() {
   const router = useRouter();
   const [thinking, setThinking] = useState(true);
-  const session = getSession();
-  const agentResults = session?.evaluation?.agent_results || [];
+  const [agentResults] = useState(
+    () => getSession()?.evaluation?.agent_results || []
+  );
 
   useEffect(() => {
     const timer = setTimeout(() => setThinking(false), 1800);

@@ -21,20 +21,22 @@ export default function HistoryPage() {
         setLoading(true);
         const contract = await getReadContract();
         const count = Number(await contract.getVerdictCount());
-        const rows = [];
-        for (let i = count - 1; i >= 0; i -= 1) {
-          const v = await contract.getVerdict(i);
-          rows.push({
-            index: i,
-            finalScore: Number(v.finalScore),
-            feasibilityScore: Number(v.feasibilityScore),
-            innovationScore: Number(v.innovationScore),
-            riskScore: Number(v.riskScore),
-            shortVerdict: v.shortVerdict,
-            submitter: v.submitter,
-            timestamp: Number(v.timestamp)
-          });
-        }
+        const indices = Array.from({ length: count }, (_, i) => count - 1 - i);
+        const rows = await Promise.all(
+          indices.map(async (i) => {
+            const v = await contract.getVerdict(i);
+            return {
+              index: i,
+              finalScore: Number(v.finalScore),
+              feasibilityScore: Number(v.feasibilityScore),
+              innovationScore: Number(v.innovationScore),
+              riskScore: Number(v.riskScore),
+              shortVerdict: v.shortVerdict,
+              submitter: v.submitter,
+              timestamp: Number(v.timestamp)
+            };
+          })
+        );
         setItems(rows);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to read history");

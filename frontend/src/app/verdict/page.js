@@ -18,7 +18,7 @@ export default function VerdictPage() {
   const [txHash, setTxHash] = useState("");
   const [error, setError] = useState("");
 
-  const session = getSession();
+  const [session] = useState(() => getSession());
   const caseText = session?.caseText || "";
   const evaluation = session?.evaluation || null;
 
